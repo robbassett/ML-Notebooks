@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat as lm
 import numpy as np
 import imageio
-        
+
 # A script for making a animation of the iterations in
 # a K-means based image compressor. The algorithm has
 # been deliberately slowed down as the point is illustrative
@@ -58,8 +58,8 @@ class Kompressor(object):
         imout = imout.reshape((self.xin,self.yin,3))
         self.im = imout
         imout = Image.fromarray(imout)
-        imout.save(f'./frames/frame{fnm}.png')
-
+        imout.save(f'./frame{fnm}.png')
+        
 # Load the PNG and remove the alpha layer
 in_image = np.asarray(Image.open('jp.png'))
 if in_image.shape[2] == 4:
@@ -89,7 +89,7 @@ for i in range(len(lrates)+25):
         tst.move_centroids()
 
     tst.remake_im(0)
-    images.append(imageio.imread(f'frames/frame0.png'))
+    images.append(imageio.imread(f'frame0.png'))
 
 
 imageio.mimsave('test.gif', images)
