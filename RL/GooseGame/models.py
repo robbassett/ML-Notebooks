@@ -127,12 +127,12 @@ class LibaAgy_mk0():
         self.loss = keras.losses.MeanSquaredError()
 
         model = keras.models.Sequential()
-        model.add(layers.Conv2D(32,(3,3),activation=None,padding='same',input_shape=dimensions))
-        model.add(layers.Conv2D(64,(3,3),activation=None,padding='same'))
-        model.add(layers.Conv2D(64,(3,3),activation=None,padding='same'))
+        model.add(layers.Conv2D(32,(3,3),activation='relu',padding='same',input_shape=dimensions))
+        model.add(layers.Conv2D(64,(3,3),activation='relu',padding='same'))
+        model.add(layers.Conv2D(64,(3,3),activation='relu',padding='same'))
         model.add(layers.Flatten())
-        model.add(layers.Dense(128,activation='softmax'))
-        model.add(layers.Dense(n_action))
+        model.add(layers.Dense(128))
+        model.add(layers.Dense(n_action,activation='softmax'))
 
         self.model = model
 
@@ -321,7 +321,6 @@ class GooseLee2D_mk0():
         self.epsilon = epsilon
         self.emin = e_min
         self.de = e_dec
-        self.action_space = [i for i in range(n_actions)]
         self.steps = 0
         self.n_actions = n_actions
         self.lrate = lrate
@@ -331,14 +330,15 @@ class GooseLee2D_mk0():
         self.batch_size=batch_size
         self.N = memmin
         self.actions = np.array(['NORTH', 'SOUTH', 'WEST', 'EAST'])
+        self.name = save_dir+name+'.h5'
         
         self.M = PersistenceOfMemory(self.memsize,self.dimensions,self.n_actions)
         self.Q = brain(self.lrate,self.n_actions,self.dimensions,save_dir=save_dir,name=name)
         self.V_eval = brain(self.lrate,self.n_actions,self.dimensions,save_dir=save_dir,name='Veval')
         self.V_targ = brain(self.lrate,self.n_actions,self.dimensions,save_dir=save_dir,name='Vtarg')
 
-    def save(self,outname='GooseLee.h5'):
-        self.Q.model.save_weights(outname)
+    def save(self):
+        self.Q.model.save_weights(self.name)
 
     def process_board(self,obs,conf,gindex):
         rows, columns = conf.rows, conf.columns
@@ -396,7 +396,7 @@ class GooseLee2D_mk0():
 
     def choose_action(self,state):
         if np.random.uniform() < self.epsilon:
-            return np.random.choice(self.action_space)
+            return np.random.choice([0,1,2,3])
 
         state_tensor = tf.convert_to_tensor(state)
         state_tensor = tf.expand_dims(state_tensor,0)
