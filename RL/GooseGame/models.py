@@ -7,108 +7,19 @@ from typing import *
 from enum import auto, Enum
 
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from matplotlib.colors import LinearSegmentedColormap as LSC
+mycm = LSC.from_list("tmcm1",['k','r','tab:orange','tab:green','dodgerblue'],N=1000)
 
 from kaggle_environments.envs.hungry_geese.hungry_geese import Observation, Configuration, row_col
 from kaggle_environments import make
 
-# - - - - - - - - - -#
-# Rules Based Models #
-#- - - - - - - - - - #
+# - - - - - #
+# Utilities #
+#- - - - - -#
 
-""" BASE GREEDY AGENT (KAGGLE)"""
-class Action(Enum):
-    NORTH = auto()
-    EAST = auto()
-    SOUTH = auto()
-    WEST = auto()
-
-    def to_row_col(self):
-        if self == Action.NORTH:
-            return -1, 0
-        if self == Action.SOUTH:
-            return 1, 0
-        if self == Action.EAST:
-            return 0, 1
-        if self == Action.WEST:
-            return 0, -1
-        return 0, 0
-
-    def opposite(self):
-        if self == Action.NORTH:
-            return Action.SOUTH
-        if self == Action.SOUTH:
-            return Action.NORTH
-        if self == Action.EAST:
-            return Action.WEST
-        if self == Action.WEST:
-            return Action.EAST
-        raise TypeError(str(self) + " is not a valid Action.")
-
-def translate(position: int, direction: Action, columns: int, rows: int) -> int:
-    row, column = row_col(position, columns)
-    row_offset, column_offset = direction.to_row_col()
-    row = (row + row_offset) % rows
-    column = (column + column_offset) % columns
-    return row * columns + column
-
-
-def adjacent_positions(position: int, columns: int, rows: int) -> List[int]:
-    return [
-        translate(position, action, columns, rows)
-        for action in Action
-    ]
-
-
-def min_distance(position: int, food: List[int], columns: int):
-    row, column = row_col(position, columns)
-    return min(
-        abs(row - food_row) + abs(column - food_column)
-        for food_position in food
-        for food_row, food_column in [row_col(food_position, columns)]
-    )
-
-class GreedyAgent:
-    def __init__(self, configuration: Configuration):
-        self.configuration = configuration
-        self.last_action = None
-
-    def __call__(self, observation, gindex):
-        rows, columns = self.configuration.rows, self.configuration.columns
-
-        food = observation['food']
-        geese = observation['geese']
-        opponents = [
-            goose
-            for index, goose in enumerate(geese)
-            if index != gindex and len(goose) > 0
-        ]
-
-        # Don't move adjacent to any heads
-        head_adjacent_positions = {
-            opponent_head_adjacent
-            for opponent in opponents
-            for opponent_head in [opponent[0]]
-            for opponent_head_adjacent in adjacent_positions(opponent_head, columns, rows)
-        }
-        # Don't move into any bodies
-        bodies = {position for goose in geese for position in goose}
-
-        # Move to the closest food
-        position = geese[gindex][0]
-        actions = {
-            action: min_distance(new_position, food, columns)
-            for action in Action
-            for new_position in [translate(position, action, columns, rows)]
-            if (
-                new_position not in head_adjacent_positions and
-                new_position not in bodies and
-                (self.last_action is None or action != self.last_action.opposite())
-            )
-        }
-
-        action = min(actions, key=actions.get) if any(actions) else choice([action for action in Action])
-        self.last_action = action
-        return action.name
+def weights_to_txt(model,outname):
+    pass
 
 # - - - - - - - #
 # Brain Classes #
@@ -132,6 +43,31 @@ class LibaAgy_mk0():
         model.add(layers.Conv2D(64,(3,3),activation='relu',padding='same'))
         model.add(layers.Flatten())
         model.add(layers.Dense(128))
+        model.add(layers.Dense(n_action,activation='softmax'))
+
+        self.model = model
+
+    def save_model(self):
+        self.model.save(self.save_file)
+
+class LibaAgy_lite():
+
+    def __init__(self,lrate,
+                     n_action,
+                     dimensions,
+                     save_dir='models/',
+                     name='GooseLee'):
+        
+        self.save_file = f'{save_dir}{name}.h5'
+        self.optimizer = keras.optimizers.Adam(learning_rate=lrate)
+        self.loss = keras.losses.MeanSquaredError()
+
+        model = keras.models.Sequential()
+        model.add(layers.Conv2D(16,(4,4),activation='relu',padding='same',input_shape=dimensions))
+        model.add(layers.Conv2D(32,(3,3),activation='relu',padding='same'))
+        model.add(layers.MaxPooling2D((2,2)))
+        model.add(layers.Flatten())
+        model.add(layers.Dense(64))
         model.add(layers.Dense(n_action,activation='softmax'))
 
         self.model = model
@@ -178,8 +114,8 @@ class PersistenceOfMemory():
 class GooseLee1D_mk0():
 
     def __init__(self,lrate,brain,
-                     n_actions,
-                     dimensions,
+                     n_actions=4,
+                     dimensions=(7,11,1),
                      gamma=0.99,
                      epsilon=1.0,
                      e_dec=2.5e-5,
@@ -204,14 +140,16 @@ class GooseLee1D_mk0():
         self.memsize=memsize
         self.batch_size=batch_size
         self.N = memmin
+        self.actions = np.array(['NORTH', 'SOUTH', 'WEST', 'EAST'])
+        self.name = save_dir+name+'.h5'
         
         self.M = PersistenceOfMemory(self.memsize,self.dimensions,self.n_actions)
         self.Q = brain(self.lrate,self.n_actions,self.dimensions,save_dir=save_dir,name=name)
         self.V_eval = brain(self.lrate,self.n_actions,self.dimensions,save_dir=save_dir,name='Veval')
         self.V_targ = brain(self.lrate,self.n_actions,self.dimensions,save_dir=save_dir,name='Vtarg')
 
-    def save(self,outname='GooseLee.h5'):
-        self.Q.model.save_weights(outname)
+    def save(self):
+        self.Q.model.save_weights(self.name)
 
     def process_board(self,obs,conf,gindex):
         rows, columns = conf.rows, conf.columns
@@ -222,37 +160,48 @@ class GooseLee1D_mk0():
                 board[r,c] = 1.0
         for gind, goose in enumerate(obs['geese']):
             if len(goose) > 0:
+                for v in goose[1:-1]:
+                    r,c = row_col(v,columns)
+                    board[r,c] = 0.4
+                r,c = row_col(goose[-1],columns)
+                board[r,c] = 0.2
+            
                 if gind != gindex:
                     r,c = row_col(goose[0],columns)
-                    board[r,c] = -1.0
-                    for v in goose[1:]:
-                        r,c = row_col(v,columns)
-                        board[r,c] = -0.5
+                    board[r,c] = 0.6
                 else:
                     r,c = row_col(goose[0],columns)
-                    board[r,c] = 0.5
-                    for v in goose[1:]:
-                        r,c = row_col(v,columns)
-                        board[r,c] = -0.5
+                    board[r,c] = 0.8
+        """
+        board[1] = board[-3]
+        board[0] = board[-4]
+        board[-2] = board[2]
+        board[-1] = board[3]
+        board[:,1] = board[:,-3]
+        board[:,0] = board[:,-4]
+        board[:,-2] = board[:,2]
+        board[:,-1] = board[:,3]
+        """
+        
         return board
 
-    def display_batch(self,bs=4):
+    def display_batch(self,conf,bs=4):
         state,action,reward,done,state_ = self.M.get_batch(bs)
         for i in range(bs):
             F = plt.figure()
             ax = F.add_subplot(121)
-            ax.imshow(state[i])
-            [ax.axvline(0.5+_,color='k') for _ in range(self.conf.columns)]
-            [ax.axhline(0.5+_,color='k') for _ in range(self.conf.rows)]
+            ax.imshow(state[i],cmap=mycm,vmin=0,vmax=1)
+            [ax.axvline(.5+_,color='k') for _ in range(conf.columns)]
+            [ax.axhline(.5+_,color='k') for _ in range(conf.rows)]
             ax.set_title(f'Action: {self.actions[action[i]]}')
             ax = F.add_subplot(122)
-            ax.imshow(state_[i])
-            [ax.axvline(0.5+_,color='k') for _ in range(self.conf.columns)]
-            [ax.axhline(0.5+_,color='k') for _ in range(self.conf.rows)]
+            ax.imshow(state_[i],cmap=mycm,vmin=0,vmax=1)
+            [ax.axvline(.5+_,color='k') for _ in range(conf.columns)]
+            [ax.axhline(.5+_,color='k') for _ in range(conf.rows)]
             ax.set_title(f'Reward: {reward[i]}')
             plt.show()
 
-    def choose_action(self,state):
+    def choose_action(self,state,length,first=False):
         if np.random.uniform() < self.epsilon:
             return np.random.choice(self.action_space)
 
@@ -264,6 +213,7 @@ class GooseLee1D_mk0():
         return tf.argmax(actions[0]).numpy()
 
     def learn(self, state, action, reward, done, state_):
+        
         self.M.store_memory(state, action, reward, done, state_)
         
         if self.M.memcount < self.N:
@@ -311,7 +261,7 @@ class GooseLee2D_mk0():
                      e_dec=2.5e-5,
                      e_min=0.01,
                      retarget=100,
-                     memsize=10000,
+                     memsize=2500,
                      memmin=128,
                      batch_size=128,
                      save_dir='models/',
@@ -331,6 +281,8 @@ class GooseLee2D_mk0():
         self.N = memmin
         self.actions = np.array(['NORTH', 'SOUTH', 'WEST', 'EAST'])
         self.name = save_dir+name+'.h5'
+        self.forbidden = np.array([1,0,3,2])
+        self.prev_action = 0
         
         self.M = PersistenceOfMemory(self.memsize,self.dimensions,self.n_actions)
         self.Q = brain(self.lrate,self.n_actions,self.dimensions,save_dir=save_dir,name=name)
@@ -394,16 +346,30 @@ class GooseLee2D_mk0():
             ax.set_title(f'Reward: {reward[i]}')
             plt.show()
 
-    def choose_action(self,state):
+    def choose_action(self,state,length,prev_action,first=False):
         if np.random.uniform() < self.epsilon:
-            return np.random.choice([0,1,2,3])
+            done = False
+            while not done:
+                act = np.random.choice([0,1,2,3])
+                if first or length > 2:
+                    done = True
+                else:
+                    if act != self.forbidden[prev_action]:
+                        done = True
 
-        state_tensor = tf.convert_to_tensor(state)
-        state_tensor = tf.expand_dims(state_tensor,0)
+        else:
+            state_tensor = tf.convert_to_tensor(state)
+            state_tensor = tf.expand_dims(state_tensor,0)
 
-        actions = self.Q.model(state_tensor,training=False)
+            actions = self.Q.model(state_tensor,training=False)
+            act = tf.argmax(actions[0]).numpy()
+            if not first and length <= 2 and act == self.forbidden[prev_action]:
+                v, act = tf.nn.top_k(actions[0],2)
+                act = act[1].numpy()
 
-        return tf.argmax(actions[0]).numpy()
+        self.prev_action = act
+
+        return act
 
     def learn(self, state, action, reward, done, state_):
         self.M.store_memory(state, action, reward, done, state_)
@@ -445,7 +411,7 @@ class GooseLee2D_mk0():
 
 class GooseGym():
 
-    def __init__(self,model,ncheck=10,ndisplay=3.14,n_smart=2,rule_bots=[GreedyAgent],switch_epoch=500,border=0,load_weights=None,shuffle=False,save_epochs=100):
+    def __init__(self,model,nchannel=3,ncheck=10,ndisplay=3.14,n_smart=2,rule_bots=[],switch_epoch=500,border=0,load_weights=None,shuffle=False,save_epochs=100):
         self.env = make('hungry_geese')
         self.env.reset(num_agents=4)
         self.n_epochs = 1000
@@ -462,6 +428,8 @@ class GooseGym():
         self.border = border
         self.shuffle = shuffle
         self.save_epochs = save_epochs
+        self.nchannel = nchannel
+        self.first = True
         
         if load_weights != None:
             print(f'Loading weights: {load_weights}')
@@ -472,6 +440,7 @@ class GooseGym():
 
         self.prev_length = [1,1,1,1]
         self.prev_act = ['ACTIVE','ACTIVE','ACTIVE','ACTIVE']
+        self.prev_action = [None,None,None,None]
         self.best = 0
 
     def step(self):
@@ -489,8 +458,10 @@ class GooseGym():
             self.env.reset(num_agents=4)
             self.prev_length = [1,1,1,1]
             self.prev_act = ['ACTIVE','ACTIVE','ACTIVE','ACTIVE']
+            self.prev_action = [None,None,None,None]
+            self.first = True
             
-        states = np.zeros((4,self.conf.rows+self.border*2,self.conf.columns+self.border*2,3))
+        states = np.zeros((4,self.conf.rows+self.border*2,self.conf.columns+self.border*2,self.nchannel))
         rewards = np.zeros(4)
         terminals = np.array([True]*4)
         actions = np.zeros(4).astype(int)
@@ -501,10 +472,16 @@ class GooseGym():
             if self.env.state[gindex]['status'] == 'ACTIVE':
                 states[gindex] = self.goose.process_board(obs,self.conf,gindex)
                 if i < self.nsmart:
-                    actions[gindex] = self.goose.choose_action(states[gindex])
+                    if self.prev_action[gindex] == None:
+                        pa = np.random.choice([0,1,2,3])
+                    else:
+                        pa = list(self.actions).index(self.prev_action[gindex])
+                    actions[gindex] = self.goose.choose_action(states[gindex],len(obs['geese'][gindex]),pa,first=self.first)
                 else:
-                    rbot = np.random.choice(self.rule_bots)
+                    rbi = gindex%len(self.rule_bots)
+                    rbot = self.rule_bots[rbi]
                     actions[gindex] = list(self.actions).index(rbot(obs,gindex))
+                self.prev_action[gindex] = self.actions[actions[gindex]]
 
         self.env.step(list(self.actions[actions]))
         obs = self.env.state[0]['observation']
@@ -517,16 +494,17 @@ class GooseGym():
                 reward = 0.1*length
                 if length <= 0:
                     if self.goose_steps[gindex]%self.conf['hunger_rate'] != 0:
-                        reward = -1
+                        reward = -100
                     self.prev_act[gindex] = 'DONE'
                 else:
                     if length > self.prev_length[gindex]:
                         self.goose_steps[gindex] = 0
-                        reward += 50
+                        reward += 100
                     self.prev_length[gindex] = length
                     
             
                 self.goose.learn(states[gindex],actions[gindex],reward,terminal,state_)
+        self.first = False
 
     def train(self,nepochs=500):
         f=0
